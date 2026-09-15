@@ -23,7 +23,7 @@ jobs:
       - name: Extract project ZIP
         run: |
           unzip -o budgeting-beta-signed-setup.zip -d extracted
-          cp -r extracted/budgeting-beta/. .
+          cp -r extracted/. .
           rm -rf extracted
 
       - name: Setup Node.js

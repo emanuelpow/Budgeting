@@ -1,0 +1,97 @@
+name: Build Budgeting APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract project ZIP
+        run: |
+          unzip -o budgeting-beta-signed-setup.zip -d extracted
+          cp -r extracted/budgeting-beta/. .
+          rm -rf extracted
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Create Android project
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Decode signing keystore
+        run: |
+          echo "${{ secrets.BUDGETING_KEYSTORE_BASE64 }}" | base64 --decode > android/budgeting-release.keystore
+
+      - name: Configure Android signing
+        env:
+          STORE_PASSWORD: ${{ secrets.BUDGETING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.BUDGETING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.BUDGETING_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/build.gradle")
+          text = p.read_text()
+
+          signing = '''
+              signingConfigs {
+                  release {
+                      storeFile file("../budgeting-release.keystore")
+                      storePassword System.getenv("STORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEY_PASSWORD")
+                  }
+              }
+          '''
+
+          text = text.replace("android {", "android {" + signing, 1)
+
+          text = text.replace(
+              "buildTypes {",
+              """buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }""",
+              1
+          )
+
+          p.write_text(text)
+          PY
+
+      - name: Build release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.BUDGETING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.BUDGETING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.BUDGETING_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Budgeting-Beta-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
